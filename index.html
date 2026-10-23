@@ -762,16 +762,25 @@
       if (window.lucide) lucide.createIcons();
     }
 
+    // =====================================================================
+    // ⚙️ KONFIGURASI UTAMA SERVER (DIISI SEKALI SEBELUM UPLOAD KE VERCEL)
+    // Masukkan URL Google Apps Script Anda di bawah ini agar SEMUA SISWA 
+    // otomatis 100% langsung terhubung ke Google Sheets tanpa perlu setting apa pun!
+    // =====================================================================
+    const APP_CONFIG = {
+      API_URL: "https://script.google.com/macros/s/AKfycby8XNi4pQohpBU0IR2Zl0FuB_QfkyOg3hmrmRf4gR73yQpdcjOmb40qYpBiKmq9gLHk/exec"
+    };
+
     // STATE UTAMA
     let currentUser = null;
     let deferredPrompt = null;
     let currentCompressedBase64 = "";
     let activeGwTab = 'laporan'; // 'laporan' atau 'belum'
 
-    // Konfigurasi Database
+    // Konfigurasi Database (Otomatis LIVE jika API_URL sudah diisi)
     let dbConfig = {
-      mode: localStorage.getItem('ah_db_mode') || 'LOCAL',
-      apiUrl: localStorage.getItem('ah_api_url') || ''
+      mode: APP_CONFIG.API_URL ? 'LIVE' : (localStorage.getItem('ah_db_mode') || 'LOCAL'),
+      apiUrl: APP_CONFIG.API_URL || localStorage.getItem('ah_api_url') || ''
     };
 
     // Auto-deteksi jika dibuka langsung dari Google Apps Script Web App
@@ -842,6 +851,27 @@
 
       updateModeIndicatorUI();
       updateNotifikasiPeriodik();
+
+      // Sinkronisasi data pengguna terbaru dari Google Sheets di latar belakang
+      if (dbConfig.mode === 'LIVE' && dbConfig.apiUrl) {
+        fetch(`${dbConfig.apiUrl}?action=getInitialData`)
+          .then(res => res.json())
+          .then(json => {
+            if (json.success && json.data) {
+              const liveUsers = [
+                { id: "ADM01", nama: "Administrator Sekolah", role: "ADMIN", kelas: "-", guruWaliId: "-", guruWaliNama: "-", pin: "1234", noWa: "-", status: "AKTIF" }
+              ];
+              (json.data.guruWali || []).forEach(gw => {
+                liveUsers.push({ id: gw.id, nama: gw.nama, role: "GURU_WALI", kelas: "Semua Binaan", guruWaliId: "-", guruWaliNama: "-", pin: "1234", noWa: gw.noWa || "-", status: "AKTIF" });
+              });
+              (json.data.siswa || []).forEach(s => {
+                liveUsers.push({ id: s.id, nama: s.nama, role: "ANAK", kelas: s.kelas, guruWaliId: s.guruWaliId, guruWaliNama: s.guruWaliNama, pin: "1234", noWa: s.noWa || "-", status: "AKTIF" });
+              });
+              saveLocalUsers(liveUsers);
+            }
+          })
+          .catch(() => {});
+      }
 
       const savedUser = localStorage.getItem('ah_current_user');
       if (savedUser) {
@@ -1759,7 +1789,13 @@
       }
     }
 
-    function quickLogin(userId) {
+    async function quickLogin(userId) {
+      if (dbConfig.mode === 'LIVE' && dbConfig.apiUrl) {
+        document.getElementById('loginUsername').value = userId;
+        document.getElementById('loginPin').value = '1234';
+        handleLogin(new Event('submit'));
+        return;
+      }
       const users = getLocalUsers();
       const user = users.find(u => u.id === userId);
       if (user) {
@@ -1824,7 +1860,13 @@
     }
     function updateModeIndicatorUI() {
       const txt = document.getElementById('txtModeIndicator');
-      if (txt) txt.textContent = dbConfig.mode === 'LIVE' ? 'Mode Google Sheets (Live)' : 'Mode Lokal (Demo)';
+      const btn = document.getElementById('btnModeIndicator');
+      if (APP_CONFIG.API_URL) {
+        if (txt) txt.textContent = 'Terkoneksi (Google Sheets)';
+        if (btn) btn.onclick = () => alert("Aplikasi sudah terhubung otomatis ke database Google Spreadsheet sekolah.");
+      } else if (txt) {
+        txt.textContent = dbConfig.mode === 'LIVE' ? 'Mode Google Sheets (Live)' : 'Mode Lokal (Demo)';
+      }
     }
 
     function formatTanggalIndo(tglStr) {
